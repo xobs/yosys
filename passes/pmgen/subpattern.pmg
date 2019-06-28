@@ -1,0 +1,37 @@
+pattern foobar
+
+state <Cell*> cursor
+udata <vector<Cell*>> cells
+
+
+match first
+	....
+endmatch
+
+code cursor
+	cursor = first;
+	cells.push_back(cursor);
+	call_tail;
+finally
+	cells.pop_back();
+endcode
+
+
+subpattern tail
+
+match next
+	modified_optional;
+	...
+endmatch
+
+code cursor
+	if (next == nullptr) {
+		/* handle match */
+		reject;
+	}
+	cursor = next;
+	cells.push_back(cursor);
+	call_tail;
+finally
+	cells.pop_back();
+endcode

@@ -21,6 +21,7 @@
 // ============================================================================
 
 module \$__ABC_FF_ (input C, D, output Q);
+	parameter CLKPOL = 1'b1;
 endmodule
 
 (* abc_box_id = 7, lib_whitebox, abc_flop = "FDRE,D,Q,\\$pastQ" *)

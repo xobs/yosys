@@ -29,7 +29,7 @@ module  \$_DFF_P_   (input D, C, output Q);
 `else
 	wire \$nextQ ;
 	\$__ABC_FDRE #(.INIT(|0)) _TECHMAP_REPLACE_ (.D(D), .Q(\$nextQ ), .\$pastQ (Q), .C(C), .CE(1'b1), .R(1'b0));
-	\$__ABC_FF_ abc_dff (.D(\$nextQ ), .Q(Q));
+	\$__ABC_FF_ #(.CLKPOL(1'b1)) abc_dff (.C(C), .D(\$nextQ ), .Q(Q));
 `endif
 endmodule
 
@@ -40,7 +40,7 @@ module  \$_DFFE_PP_ (input D, C, E, output Q);
 `else
 	wire \$nextQ ;
 	\$__ABC_FDRE #(.INIT(|0)) _TECHMAP_REPLACE_ (.D(D), .Q(\$nextQ ), .\$pastQ (Q), .C(C), .CE(E), .R(1'b0));
-	\$__ABC_FF_ abc_dff (.D(\$nextQ ), .Q(Q));
+	\$__ABC_FF_ #(.CLKPOL(1'b1)) abc_dff (.C(C), .D(\$nextQ ), .Q(Q));
 `endif
 endmodule
 

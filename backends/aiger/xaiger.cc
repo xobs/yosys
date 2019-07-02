@@ -84,6 +84,7 @@ struct XAigerWriter
 	vector<std::tuple<SigBit,RTLIL::Cell*,RTLIL::IdString,int>> ci_bits;
 	vector<std::tuple<SigBit,RTLIL::Cell*,RTLIL::IdString,int,int>> co_bits;
 	vector<SigBit> ff_bits;
+	vector<int> ff_classes;
 
 	vector<pair<int, int>> aig_gates;
 	vector<int> aig_latchin, aig_latchinit, aig_outputs;
@@ -92,6 +93,9 @@ struct XAigerWriter
 	dict<SigBit, int> aig_map;
 	dict<SigBit, int> ordered_outputs;
 	dict<SigBit, int> ordered_latches;
+
+	dict<SigBit, int> clock_class_map;
+	dict<SigBit, int> ff_class_map;
 
 	vector<Cell*> box_list;
 	bool omode = false;
@@ -214,6 +218,20 @@ struct XAigerWriter
 		dict<IdString, std::pair<IdString,IdString>> flop_data;
 		bool abc_box_seen = false;
 
+		// Prepare flop classes
+		for (auto cell : module->selected_cells()) {
+			if (cell->type == "$__ABC_FF_") {
+				SigBit D = sigmap(cell->getPort("\\D").as_bit());
+				SigBit C = sigmap(cell->getPort("\\C").as_bit());
+
+				if (!clock_class_map.count(C))
+					clock_class_map[C] = GetSize(clock_class_map) + 1;
+				int clkpol = cell->hasParam("\\CLKPOL") ? cell->getParam("\\CLKPOL").as_bool() : 1;
+				int cls = clock_class_map[C] * 2 + clkpol;
+				ff_class_map[D] = cls;
+			}
+		}
+
 		for (auto cell : module->selected_cells()) {
 			if (cell->type == "$_NOT_")
 			{
@@ -301,7 +319,7 @@ struct XAigerWriter
 						alias_map[O] = q;
 					undriven_bits.erase(O);
 					ff_bits.emplace_back(q);
-
+					ff_classes.emplace_back(ff_class_map.at(O));
 				}
 				else {
 					for (const auto &conn : cell->connections()) {
@@ -841,8 +859,7 @@ struct XAigerWriter
 			auto write_r_buffer = std::bind(write_buffer, std::ref(r_buffer), std::placeholders::_1);
 			log_debug("flopNum = %zu\n", ff_bits.size());
 			write_r_buffer(ff_bits.size());
-			int mergeability_class = 1;
-			for (auto cell : ff_bits)
+			for (auto mergeability_class : ff_classes)
 				write_r_buffer(mergeability_class);
 
 			f << "r";

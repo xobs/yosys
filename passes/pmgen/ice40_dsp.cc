@@ -25,6 +25,120 @@ PRIVATE_NAMESPACE_BEGIN
 
 #include "passes/pmgen/ice40_dsp_pm.h"
 
+Cell *create_ice40_mul_mac16(ice40_dsp_pm &pm)
+{
+	// SB_MAC16 Input Interface
+	Cell *cell = pm.module->addCell(NEW_ID, "\\SB_MAC16");
+	cell->setPort("\\A", pm.module->addWire(NEW_ID, 16));
+	cell->setPort("\\B", pm.module->addWire(NEW_ID, 16));
+	cell->setPort("\\C", State::S0);
+	cell->setPort("\\D", State::S0);
+
+	cell->setParam("\\A_REG", State::S0);
+	cell->setParam("\\B_REG", State::S0);
+
+	cell->setPort("\\AHOLD", State::S0);
+	cell->setPort("\\BHOLD", State::S0);
+	cell->setPort("\\CHOLD", State::S0);
+	cell->setPort("\\DHOLD", State::S0);
+
+	cell->setPort("\\IRSTTOP", State::S0);
+	cell->setPort("\\IRSTBOT", State::S0);
+
+	// Leave the port unclocked
+	cell->setPort("\\CLK", State::S0);
+	cell->setPort("\\CE", State::S0);
+	cell->setParam("\\NEG_TRIGGER", State::S0);
+
+	// SB_MAC16 Cascade Interface
+
+	cell->setPort("\\SIGNEXTIN", State::Sx);
+	cell->setPort("\\SIGNEXTOUT", pm.module->addWire(NEW_ID));
+
+	cell->setPort("\\CI", State::Sx);
+	cell->setPort("\\CO", pm.module->addWire(NEW_ID));
+
+	cell->setPort("\\ACCUMCI", State::Sx);
+	cell->setPort("\\ACCUMCO", pm.module->addWire(NEW_ID));
+
+	// SB_MAC16 Output Interface
+	SigSpec O = pm.module->addWire(NEW_ID, 32);
+	cell->setPort("\\O", O);
+
+	cell->setPort("\\ADDSUBTOP", State::S0);
+	cell->setPort("\\ADDSUBBOT", State::S0);
+
+	cell->setPort("\\ORSTTOP", State::S0);
+	cell->setPort("\\ORSTBOT", State::S0);
+
+	cell->setPort("\\OHOLDTOP", State::S0);
+	cell->setPort("\\OHOLDBOT", State::S0);
+
+	cell->setPort("\\OLOADTOP", State::S0);
+	cell->setPort("\\OLOADBOT", State::S0);
+
+	// SB_MAC16 Remaining Parameters
+
+	cell->setParam("\\C_REG", State::S0);
+	cell->setParam("\\D_REG", State::S0);
+
+	cell->setParam("\\TOP_8x8_MULT_REG", State::S0);
+	cell->setParam("\\BOT_8x8_MULT_REG", State::S0);
+	cell->setParam("\\PIPELINE_16x16_MULT_REG1", State::S0);
+	cell->setParam("\\PIPELINE_16x16_MULT_REG2", State::S0);
+
+	cell->setParam("\\TOPOUTPUT_SELECT", Const(3, 2));
+	cell->setParam("\\TOPADDSUB_LOWERINPUT", Const(0, 2));
+	cell->setParam("\\TOPADDSUB_UPPERINPUT", State::S0);
+	cell->setParam("\\TOPADDSUB_CARRYSELECT", Const(0, 2));
+
+	cell->setParam("\\BOTOUTPUT_SELECT", Const(3, 2));
+	cell->setParam("\\BOTADDSUB_LOWERINPUT", Const(0, 2));
+	cell->setParam("\\BOTADDSUB_UPPERINPUT", State::S0);
+	cell->setParam("\\BOTADDSUB_CARRYSELECT", Const(0, 2));
+
+	cell->setParam("\\MODE_8x8", State::S0);
+	cell->setParam("\\A_SIGNED", State::S0);
+	cell->setParam("\\B_SIGNED", State::S0);
+
+	return cell;
+}
+
+void create_ice40_32x32_multiplier(ice40_dsp_pm &pm)
+{
+	auto &st = pm.st_ice40_dsp;
+	SigSpec srcA = st.sigA;
+	SigSpec srcB = st.sigB;
+	SigSpec dest = st.sigY;
+
+	Cell *mac16_lo_lo = create_ice40_mul_mac16(pm);
+	Cell *mac16_lo_hi = create_ice40_mul_mac16(pm);
+	Cell *mac16_hi_lo = create_ice40_mul_mac16(pm);
+
+	mac16_lo_lo->setPort("\\A", srcA.extract(16, 16));
+	mac16_lo_lo->setPort("\\B", srcB.extract(16, 16));
+
+	mac16_lo_hi->setPort("\\A", srcA.extract(16, 16));
+	mac16_lo_hi->setPort("\\B", srcB.extract(0, 16));
+
+	mac16_hi_lo->setPort("\\A", srcA.extract(0, 16));
+	mac16_hi_lo->setPort("\\B", srcB.extract(16, 16));
+
+	// result <= int_lo_lo[0:31] + (int_lo_hi[0:31] << 16) + (int_hi_lo[0:31] << 16);// + int_hi_hi[0:15];
+	SigSpec high_bits_result = pm.module->addWire(NEW_ID, 16);
+	pm.module->addAdd(NEW_ID, mac16_hi_lo->getPort("\\O").extract(16, 16), mac16_lo_hi->getPort("\\O").extract(16, 16), high_bits_result);
+
+	SigSpec high_bits_extended = pm.module->addWire(NEW_ID, 16);
+	high_bits_extended.append(high_bits_result);
+
+	Cell *final_adder = pm.module->addAdd(NEW_ID, mac16_lo_lo->getPort("\\O"), high_bits_extended, dest);
+	pm.module->swap_names(final_adder, st.mul);
+
+	pm.autoremove(st.mul);
+	pm.autoremove(st.ffY);
+	pm.autoremove(st.ffS);
+}
+
 void create_ice40_dsp(ice40_dsp_pm &pm)
 {
 	auto &st = pm.st_ice40_dsp;
@@ -41,6 +155,13 @@ void create_ice40_dsp(ice40_dsp_pm &pm)
 #endif
 
 	log("Checking %s.%s for iCE40 DSP inference.\n", log_id(pm.module), log_id(st.mul));
+
+	if ((GetSize(st.sigA) == 32) && (GetSize(st.sigB) == 32)
+	 && (GetSize(st.sigS) == 0) && (GetSize(st.sigY) == 32)) {
+		log("  inferring 32x32 multiplier");
+		create_ice40_32x32_multiplier(pm);
+		return;
+	}
 
 	if (GetSize(st.sigA) > 16) {
 		log("  input A (%s) is too large (%d > 16).\n", log_signal(st.sigA), GetSize(st.sigA));
